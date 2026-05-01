@@ -106,7 +106,6 @@ def run_facet_dimpc(
 
     x_traj[0]  = x0.copy()
     U_opt_prev: dict[int, np.ndarray] | None = None
-    prev_combo: tuple[int, ...] | None = None
 
     n_restricted_fallback = 0
     n_full_fallback       = 0
@@ -119,25 +118,42 @@ def run_facet_dimpc(
         U_warm = saturate_inputs(U_warm, plant)
 
         # ── build restricted search sets ──────────────────────────────────────
-        if prev_combo is not None:
-            search_sets = []
-            for i in range(M):
-                v_prev = prev_combo[i]
-                # S_i = {v*_i} ∪ facet_neighbors(v*_i)
-                S_i = sorted(set([v_prev] + mp_sol[i][v_prev].facet_neighbors))
-                search_sets.append(S_i)
-        else:
-            # k=0 or after a fallback: use full set
-            search_sets = all_cr_indices
+        search_sets = []
+        warm_combo  = []
+        for i in range(M):
+            # 1) Build parameter vector theta_i from warm start
+            theta_i = []
+            for j in range(M):
+                if j == i: continue
+                theta_i.append(U_warm[j].flatten())
+            theta_i_vec = np.concatenate([x_k] + theta_i)
 
-        # ── restricted search — try prev_combo first, then remaining set ────────
+            # 2) Find which CR contains this theta (PointLocation in MATLAB)
+            v_warm = None
+            for v, cr in enumerate(mp_sol[i].regions):
+                if cr.contains(theta_i_vec):
+                    v_warm = v
+                    break
+
+            # 3) Build S_i: the warm CR and its facet neighbors
+            if v_warm is not None:
+                warm_combo.append(v_warm)
+                S_i = sorted(set([v_warm] + cr.facet_neighbors))
+                search_sets.append(S_i)
+            else:
+                warm_combo.append(None)
+                search_sets.append(all_cr_indices[i])
+
+        # ── restricted search ────────────────────────────────────────────────
         U_bar        = None
         combo_tried  = 0
 
-        # Build iteration: prev_combo first (warm hint), then the rest of S_i
-        if prev_combo is not None:
-            rest = (c for c in itertools.product(*search_sets) if c != prev_combo)
-            restricted_iter = itertools.chain([prev_combo], rest)
+        # Try the warm_combo first if it's fully valid
+        restricted_iter = None
+        if all(v is not None for v in warm_combo):
+            warm_tup = tuple(warm_combo)
+            rest = (c for c in itertools.product(*search_sets) if c != warm_tup)
+            restricted_iter = itertools.chain([warm_tup], rest)
         else:
             restricted_iter = itertools.product(*search_sets)
 
@@ -147,7 +163,6 @@ def run_facet_dimpc(
             U_sol = _solve_combination(cr_combo, x_k, plant, sizes, offsets)
             if U_sol is not None:
                 U_bar      = U_sol
-                prev_combo = combo
                 converged[k] = True
                 break
 
@@ -161,14 +176,12 @@ def run_facet_dimpc(
                 U_sol = _solve_combination(cr_combo, x_k, plant, sizes, offsets)
                 if U_sol is not None:
                     U_bar      = U_sol
-                    prev_combo = combo
                     break
 
         # ── fallback 2: one-shot I-mpDiMPC ────────────────────────────────────
         if U_bar is None:
             n_full_fallback += 1
             U_bar      = _fallback_one_step(x_k, U_warm, mp_sol, qp_mats, plant)
-            prev_combo = None
 
         U_bar = saturate_inputs(U_bar, plant)
 

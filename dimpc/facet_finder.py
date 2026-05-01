@@ -225,9 +225,10 @@ def find_facet_neighbors(
                         found = True
                         break
             elif method == "hyperplane":
-                # Simple normal comparison
+                # Simple normal comparison: match MATLAB's A./b == A./b
+                # which covers BOTH same and opposite constraint directions.
                 for j in range(cr_v.n_ineq):
-                    if _hyperplane_in_cr(cr_v.E[j], cr_v.f[j], cr_w, tol=tol_pre, check_same_direction=False):
+                    if _hyperplane_in_cr(cr_v.E[j], cr_v.f[j], cr_w, tol=tol_pre, check_same_direction=True):
                         found = True
                         break
 

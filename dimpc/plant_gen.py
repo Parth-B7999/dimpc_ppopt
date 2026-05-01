@@ -4,18 +4,16 @@ plant_gen.py — Random stable controllable plant generator.
 Matches the case study setup in:
   Saini, Brahmbhatt et al. (C&ChE 2025), Section 4
   Brahmbhatt et al. (ACC 2026), Section IV-A
+  MATLAB reference: Step1_ModelCreater_3s.m
 
-Per-subsystem parameters (fixed):
+Per-subsystem parameters (fixed, matching MATLAB Step1_ModelCreater_3s.m):
   nx_i = 2 states,  nu_i = 1 input
-  A_i  elements ~ Uniform[-1, 1],  scaled so spectral radius ≤ rho_max
+  A_i  elements ~ Uniform[-1, 1], resampled until spectral radius < 1 (stable)
   B_{i,j} elements ~ Uniform[-1, 1]  (all j, full coupling)
-  State bounds: lb ∈ Uniform[-10, -2]^nx,  ub ∈ Uniform[2, 10]^nx
-  Input bounds: lb ∈ Uniform[-2,  -0.5],   ub ∈ Uniform[0.5, 2]
-
-NOTE: Tight bounds are essential.  Wide bounds (e.g. ±100) cause PPOPT to
-generate 200+ CRs per controller, making the 8.7M-combo IF/FACET search
-intractable.  The paper uses small symmetric box constraints (~±5 on states)
-so each controller produces ~10-30 CRs and the total combo count stays ≤ ~27K.
+  State bounds: lb ~ Uniform[-100, -10]^nx_total  (MATLAB: rand*90 - 100)
+               ub ~ Uniform[ 10, 100]^nx_total  (MATLAB: rand*90 + 10)
+  Input bounds: lb ~ Uniform[-5,  -1]  (MATLAB: rand*4 - 5)
+               ub ~ Uniform[ 1,   5]  (MATLAB: rand*4 + 1)
 """
 
 from __future__ import annotations
@@ -38,16 +36,19 @@ def make_random_plant(
     """
     Generate one random stable plant with M coupled subsystems.
 
-    A_i is rescaled so spectral radius < rho_max.  B_{i,j} is fully random
-    (all subsystems coupled to all inputs), matching the paper setup.
+    Matches MATLAB Step1_ModelCreater_3s.m exactly:
+      - A_i resampled until all eigenvalues strictly inside unit circle (|eig| < 1)
+      - B is (nx_i, nu_i*M) full coupling matrix; split into per-controller columns
+      - Bounds match MATLAB: Xmin in [-100,-10], Xmax in [10,100],
+        Umin in [-5,-1], Umax in [1,5]
 
     Parameters
     ----------
     M       : number of subsystems
-    Np      : prediction horizon
+    Np      : prediction horizon (MATLAB: OH=NC=DH=3)
     nx_i    : states per subsystem (paper: 2)
     nu_i    : inputs per subsystem (paper: 1)
-    rho_max : stability threshold for each A_i
+    rho_max : unused (A is resampled until stable, matching MATLAB while loop)
     rng     : numpy Generator  (created internally if None)
     """
     if rng is None:
@@ -56,22 +57,26 @@ def make_random_plant(
     subsystems = []
     for i in range(M):
 
-        # ── A_i: random, rescaled for stability ──────────────────────────────
-        A_i  = rng.uniform(-1.0, 1.0, (nx_i, nx_i))
-        rho  = np.max(np.abs(np.linalg.eigvals(A_i)))
-        if rho >= rho_max:
-            A_i *= (rho_max * 0.9) / rho     # scale to 0.9*rho_max
+        # ── A_i: resample until stable (spectral radius < 1) ───────────────────
+        # Matches MATLAB: while any(abs(eig(A)) >= 1) ... end
+        A_i = rng.uniform(-1.0, 1.0, (nx_i, nx_i))
+        while np.max(np.abs(np.linalg.eigvals(A_i))) >= 1.0:
+            A_i = rng.uniform(-1.0, 1.0, (nx_i, nx_i))
 
-        # ── B_{i,j}: fully random coupling ───────────────────────────────────
-        B = {j: rng.uniform(-1.0, 1.0, (nx_i, nu_i)) for j in range(M)}
+        # ── B: full (nx_i, nu_i*M) matrix, split per controller column ───────
+        # Matches MATLAB: B = rand(nx, nu*np)*2-1;  then model.B = aux(:,i)
+        B_full = rng.uniform(-1.0, 1.0, (nx_i, nu_i * M))   # (2, M)
+        B = {j: B_full[:, j*nu_i:(j+1)*nu_i] for j in range(M)}
 
-        # ── Bounds: tight to keep mpQP tractable (paper Section IV-A) ─────────
-        # Wide bounds (e.g. ±100) generate 200+ CRs → combinatorial explosion.
-        # Tight bounds (±2 to ±10) keep each controller at ~10-30 CRs.
-        x_lb = rng.uniform(-10.0, -2.0, nx_i)
-        x_ub = rng.uniform(  2.0, 10.0, nx_i)
-        u_lb = rng.uniform( -2.0, -0.5, nu_i)
-        u_ub = rng.uniform(  0.5,  2.0, nu_i)
+        # ── Bounds matching MATLAB exactly ──────────────────────────────────
+        # MATLAB: Xmax = rand(1,nx*np)*90 + 10  → Uniform[10, 100]
+        # MATLAB: Xmin = rand(1,nx*np)*90 - 100 → Uniform[-100, -10]
+        # MATLAB: Umax = rand(1,nu*np)*4  + 1   → Uniform[1, 5]
+        # MATLAB: Umin = rand(1,nu*np)*4  - 5   → Uniform[-5, -1]
+        x_lb = rng.uniform(-100.0, -10.0, nx_i)
+        x_ub = rng.uniform(  10.0, 100.0, nx_i)
+        u_lb = rng.uniform(  -5.0,  -1.0, nu_i)
+        u_ub = rng.uniform(   1.0,   5.0, nu_i)
 
         subsystems.append(Subsystem(
             index=i, A=A_i, B=B,
