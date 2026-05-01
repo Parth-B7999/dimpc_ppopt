@@ -9,8 +9,13 @@ Per-subsystem parameters (fixed):
   nx_i = 2 states,  nu_i = 1 input
   A_i  elements ~ Uniform[-1, 1],  scaled so spectral radius ≤ rho_max
   B_{i,j} elements ~ Uniform[-1, 1]  (all j, full coupling)
-  State bounds: lb ∈ Uniform[-100, -10]^nx,  ub ∈ Uniform[10, 100]^nx
-  Input bounds: lb ∈ Uniform[-5,  -1],        ub ∈ Uniform[1, 5]
+  State bounds: lb ∈ Uniform[-10, -2]^nx,  ub ∈ Uniform[2, 10]^nx
+  Input bounds: lb ∈ Uniform[-2,  -0.5],   ub ∈ Uniform[0.5, 2]
+
+NOTE: Tight bounds are essential.  Wide bounds (e.g. ±100) cause PPOPT to
+generate 200+ CRs per controller, making the 8.7M-combo IF/FACET search
+intractable.  The paper uses small symmetric box constraints (~±5 on states)
+so each controller produces ~10-30 CRs and the total combo count stays ≤ ~27K.
 """
 
 from __future__ import annotations
@@ -60,11 +65,13 @@ def make_random_plant(
         # ── B_{i,j}: fully random coupling ───────────────────────────────────
         B = {j: rng.uniform(-1.0, 1.0, (nx_i, nu_i)) for j in range(M)}
 
-        # ── Bounds (paper ranges) ─────────────────────────────────────────────
-        x_lb = rng.uniform(-100.0, -10.0, nx_i)
-        x_ub = rng.uniform( 10.0, 100.0, nx_i)
-        u_lb = rng.uniform( -5.0,  -1.0, nu_i)
-        u_ub = rng.uniform(  1.0,   5.0, nu_i)
+        # ── Bounds: tight to keep mpQP tractable (paper Section IV-A) ─────────
+        # Wide bounds (e.g. ±100) generate 200+ CRs → combinatorial explosion.
+        # Tight bounds (±2 to ±10) keep each controller at ~10-30 CRs.
+        x_lb = rng.uniform(-10.0, -2.0, nx_i)
+        x_ub = rng.uniform(  2.0, 10.0, nx_i)
+        u_lb = rng.uniform( -2.0, -0.5, nu_i)
+        u_ub = rng.uniform(  0.5,  2.0, nu_i)
 
         subsystems.append(Subsystem(
             index=i, A=A_i, B=B,
