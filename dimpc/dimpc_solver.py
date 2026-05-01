@@ -301,6 +301,10 @@ def _run_algorithm1(
         r          = 1      # 1 = first pass, 2 = Wegstein active
         U_bar_prev = None
         U_raw_prev = None
+        
+        # U_sat is the saturated broadcast vector (used for theta and convergence)
+        U_sat      = {i: U_bar[i].copy() for i in range(M)}
+        U_sat_prev = None
 
         # ── intermediate iteration loop ───────────────────────────────────────
         p = 0
@@ -309,7 +313,7 @@ def _run_algorithm1(
             # ── solve each controller ─────────────────────────────────────────
             U_raw_new = {}
             for i in range(M):
-                theta_i       = assemble_theta(x_k, U_bar, i, plant)
+                theta_i       = assemble_theta(x_k, U_sat, i, plant)
                 U_raw_new[i]  = solve_fns[i](theta_i)
 
             # ── Wegstein update ───────────────────────────────────────────────
@@ -331,11 +335,13 @@ def _run_algorithm1(
                 U_bar      = {i: U_bar_new[i].copy() for i in range(M)}
 
             U_raw_prev = {i: U_raw_new[i].copy() for i in range(M)}
-            U_bar      = saturate_inputs(U_bar, plant)
+            
+            U_sat_prev = {i: U_sat[i].copy() for i in range(M)}
+            U_sat      = saturate_inputs(U_bar, plant)
 
             # ── convergence check ─────────────────────────────────────────────
-            if U_bar_prev is not None:
-                delta = np.concatenate([np.abs(U_bar[i] - U_bar_prev[i])
+            if U_sat_prev is not None:
+                delta = np.concatenate([np.abs(U_sat[i] - U_sat_prev[i])
                                         for i in range(M)])
                 if np.all(delta < eps):
                     converged[k] = True
@@ -344,12 +350,12 @@ def _run_algorithm1(
         iter_counts[k] = p
         solve_times[k] = time.perf_counter() - t_start
 
-        u_k = {i: U_bar[i][:plant.subsystems[i].nu] for i in range(M)}
+        u_k = {i: U_sat[i][:plant.subsystems[i].nu] for i in range(M)}
         for i in range(M):
             u_traj[i][k] = u_k[i]
 
         x_traj[k + 1] = plant.step(x_k, u_k)
-        U_opt_prev     = {i: U_bar[i].copy() for i in range(M)}
+        U_opt_prev     = {i: U_sat[i].copy() for i in range(M)}
 
         if verbose and (k % 10 == 0 or k == T - 1):
             print(f"  [{label}] k={k:3d}  iters={iter_counts[k]:3d}  "
@@ -377,7 +383,7 @@ def run_dimpc(
     p_max: int = 100,
     eps: float = 1e-8,
     w_min: float = -5.0,
-    w_max: float = 0.0,
+    w_max: float = 5.0,
     Q_list: list[np.ndarray] | None = None,
     R_list: list[np.ndarray] | None = None,
     P_list: list[np.ndarray] | None = None,

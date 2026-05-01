@@ -177,7 +177,7 @@ def run_if_mpdimpc(
     p_max: int = 100,
     eps: float = 1e-8,
     w_min: float = -5.0,
-    w_max: float = 0.0,
+    w_max: float = 5.0,
     Q_list: list[np.ndarray] | None = None,
     R_list: list[np.ndarray] | None = None,
     P_list: list[np.ndarray] | None = None,
