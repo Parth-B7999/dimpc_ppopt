@@ -30,6 +30,34 @@ from .cr_store import CriticalRegion, ControllerSolution, MPSolutions
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Helper: detect axis-aligned (box) constraints
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _is_box_constraint(e: np.ndarray, tol: float = 1e-8) -> bool:
+    """
+    Return True if e is a pure axis-aligned unit vector (±e_k), i.e.
+    exactly one non-zero entry equal to ±1.
+
+    The parameter-space box constraints   A_t θ ≤ b_t   come from:
+        [+I; -I] θ ≤ [θ_max; -θ_min]
+    so every CR produced by PPOPT inherits 2*n_theta ±e_k rows.
+    These rows appear identically (or with the exact opposite sign) in every
+    CR, so they always trigger the opposite-normal check and produce a false
+    positive "facet neighbor" for every single pair of CRs.
+
+    Skipping them in the hyperplane method eliminates the false positives
+    without discarding genuine facets, because genuine facets arise from the
+    active constraints of the QP (G_i U_i ≤ b_i + F_i θ_i), not from the
+    parameter-space bounding box.
+    """
+    nz = np.count_nonzero(np.abs(e) > tol)
+    if nz != 1:
+        return False
+    val = np.abs(e[np.abs(e) > tol][0])
+    return abs(val - 1.0) < tol
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Pre-check: does hyperplane H = {x : e^T x = f} appear in CR_k?
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -47,13 +75,23 @@ def _hyperplane_in_cr(
     constraint row at the common facet. If check_same_direction is False,
     only opposite signs (pointing outwards) are matched, which acts as a fast
     facet test without LP.
+
+    NOTE: axis-aligned (box) constraint rows are always skipped — they come
+    from the parameter-space bounding box A_t θ ≤ b_t and appear identically
+    in every CR, so they would cause every pair of CRs to be flagged as
+    neighbors.
     """
     e_norm = e / (np.linalg.norm(e) + 1e-14)
     f_s    = f  / (np.linalg.norm(e) + 1e-14)
 
     for l in range(cr_k.n_ineq):
-        nrm = np.linalg.norm(cr_k.E[l]) + 1e-14
-        ek_norm = cr_k.E[l] / nrm
+        ek = cr_k.E[l]
+        # ── skip box constraints on both sides ────────────────────────────────
+        if _is_box_constraint(e) or _is_box_constraint(ek):
+            continue
+
+        nrm = np.linalg.norm(ek) + 1e-14
+        ek_norm = ek / nrm
         fk_s    = cr_k.f[l] / nrm
 
         # Same direction: e ~ e_k, f ~ f_k
