@@ -162,6 +162,10 @@ def run_one_plant(plant, x0, M, plant_idx, p_max):
                 "total_time":  float(r.solve_times.sum()),
                 "conv_pct":    float(r.converged.mean()) * 100,
                 "final_norm":  float(np.linalg.norm(r.x_traj[-1])),
+                # Clarify what iter_counts means for this method:
+                #   DiMPC / I-mpDiMPC  → Wegstein/consensus communication rounds
+                #   IF-mpDiMPC / FACET → number of CR combinations searched (NOT iterations)
+                "iter_label":  "CommRnds" if name in ("DiMPC", "I-mpDiMPC") else "CRCombos",
             }
         except Exception as e:
             result["methods"][name] = {"error": str(e)}
@@ -214,17 +218,19 @@ def _print_plant_row(res: dict):
         return
     print(f"    CRs={res['n_crs']}  combos={res['n_combos']}  "
           f"offline={res['offline_time']:.1f}s")
-    print(f"    {'Method':<14} {'AvgIter':>8} {'MaxIter':>8} "
-          f"{'AvgMs':>8} {'Conv%':>7} {'||xT||':>9}")
-    print(f"    {'-'*58}")
+    # Header note: AvgCount means different things per method
+    print(f"    {'Method':<14} {'AvgCount':>9} {'MaxCount':>9} "
+          f"{'AvgMs':>8} {'Conv%':>7} {'||xT||':>9}  {'CountMeaning':<10}")
+    print(f"    {'-'*70}")
     for name in ["DiMPC", "I-mpDiMPC", "IF-mpDiMPC", "FACET-DiMPC"]:
         m = res["methods"].get(name, {})
         if "error" in m:
             print(f"    {name:<14}  ERROR: {m['error']}")
         else:
-            print(f"    {name:<14} {m['avg_iters']:>8.1f} {m['max_iters']:>8d} "
+            label = m.get("iter_label", "CommRnds" if name in ("DiMPC", "I-mpDiMPC") else "CRCombos")
+            print(f"    {name:<14} {m['avg_iters']:>9.1f} {m['max_iters']:>9d} "
                   f"{m['avg_time_ms']:>8.3f} {m['conv_pct']:>6.0f}% "
-                  f"{m['final_norm']:>9.5f}")
+                  f"{m['final_norm']:>9.5f}  [{label}]")
 
 
 # %% ── 4. Run all M ───────────────────────────────────────────────────────────
