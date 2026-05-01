@@ -144,13 +144,16 @@ def run_one_plant(plant, x0, M, plant_idx, p_max):
                             plant, x0, T_SIM, mp_sol,
                             p_max=p_max, eps=1e-8,
                             qp_mats=qp_mats, verbose=False),
-        "IF-mpDiMPC":  lambda: run_if_mpdimpc(
-                            plant, x0, T_SIM, mp_sol,
-                            qp_mats=qp_mats, verbose=False),
         "FACET-DiMPC": lambda: run_facet_dimpc(
                             plant, x0, T_SIM, mp_sol,
                             qp_mats=qp_mats, verbose=False),
     }
+
+    # IF-mpDiMPC full search is too slow for M>=3 (combinatorial explosion)
+    if M < 3:
+        methods_cfg["IF-mpDiMPC"] = lambda: run_if_mpdimpc(
+            plant, x0, T_SIM, mp_sol, qp_mats=qp_mats, verbose=False
+        )
 
     for name, fn in methods_cfg.items():
         try:
@@ -222,8 +225,12 @@ def _print_plant_row(res: dict):
     print(f"    {'Method':<14} {'AvgCount':>9} {'MaxCount':>9} "
           f"{'AvgMs':>8} {'Conv%':>7} {'||xT||':>9}  {'CountMeaning':<10}")
     print(f"    {'-'*70}")
-    for name in ["DiMPC", "I-mpDiMPC", "IF-mpDiMPC", "FACET-DiMPC"]:
-        m = res["methods"].get(name, {})
+    
+    order = ["DiMPC", "I-mpDiMPC", "IF-mpDiMPC", "FACET-DiMPC"]
+    present_methods = [m for m in order if m in res["methods"]]
+    
+    for name in present_methods:
+        m = res["methods"][name]
         if "error" in m:
             print(f"    {name:<14}  ERROR: {m['error']}")
         else:
